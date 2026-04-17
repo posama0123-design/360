@@ -2,103 +2,140 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>360度パノラマカメラガイド</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>360°撮影ガイドカメラ</title>
     <style>
-        body { font-family: sans-serif; margin: 0; text-align: center; background: #222; color: white; }
-        #container { position: relative; width: 100%; max-width: 600px; margin: auto; overflow: hidden; }
-        video { width: 100%; background: #000; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #video { width: 100vw; height: 100vh; object-fit: cover; }
         
-        /* 撮影ガイド（中央の枠） */
-        #guide {
-            position: absolute;
-            top: 50%; left: 50%;
+        /* 画面中央の固定レティクル（照準） */
+        #reticle {
+            position: absolute; top: 50%; left: 50%;
+            width: 40px; height: 40px;
+            border: 2px solid white; border-radius: 50%;
             transform: translate(-50%, -50%);
-            width: 80%; height: 60%;
-            border: 2px dashed rgba(255, 255, 255, 0.8);
-            box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.5); /* 枠の外を暗くする */
-            pointer-events: none;
-        }
-        #guide::after {
-            content: "前の写真と少し重ねて撮影してください";
-            position: absolute; bottom: -30px; left: 0; width: 100%; font-size: 12px;
+            z-index: 10;
         }
 
-        .controls { padding: 20px; }
-        button { padding: 15px 30px; font-size: 16px; border-radius: 50px; border: none; cursor: pointer; }
-        #shutter { background: #ff4757; color: white; margin-bottom: 10px; }
-        #download { background: #2ed573; color: white; display: none; }
-        
-        #previewCanvas { 
-            width: 100%; margin-top: 10px; border: 1px solid #555; 
-            background: #000; display: none;
+        /* 空中に浮いているターゲット（点） */
+        #target {
+            position: absolute;
+            width: 30px; height: 30px;
+            background: #ff3e3e; border-radius: 50%;
+            box-shadow: 0 0 15px #ff3e3e;
+            display: none; z-index: 5;
+            transform: translate(-50%, -50%);
         }
+
+        #status {
+            position: absolute; top: 20px; width: 100%;
+            text-align: center; color: white; background: rgba(0,0,0,0.5);
+        }
+
+        #start-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: white; z-index: 100;
+        }
+        button { padding: 15px 30px; font-size: 18px; cursor: pointer; border-radius: 30px; border: none; }
     </style>
 </head>
 <body>
 
-    <h2>パノラマ作成ガイド</h2>
-
-    <div id="container">
-        <video id="video" autoplay playsinline></video>
-        <div id="guide"></div>
+    <div id="start-overlay">
+        <h3>360度ガイドカメラ</h3>
+        <p>センサーとカメラを許可してください</p>
+        <button id="start-btn">撮影開始</button>
     </div>
 
-    <div class="controls">
-        <button id="shutter">📸 撮影して右に繋げる</button>
-        <br><br>
-        <canvas id="previewCanvas"></canvas>
-        <br>
-        <button id="download">完成した画像を保存</button>
-        <p id="status">カメラを許可してください</p>
-    </div>
+    <div id="status">ターゲットに円を合わせてください</div>
+    <div id="reticle"></div>
+    <div id="target"></div>
+    <video id="video" autoplay playsinline></video>
 
     <script>
         const video = document.getElementById('video');
-        const canvas = document.getElementById('previewCanvas');
-        const ctx = canvas.getContext('2d');
-        const shutterBtn = document.getElementById('shutter');
-        const downloadBtn = document.getElementById('download');
+        const target = document.getElementById('target');
+        const startBtn = document.getElementById('start-btn');
+        const startOverlay = document.getElementById('start-overlay');
         const statusText = document.getElementById('status');
 
-        let totalWidth = 0;
-        let photoHeight = 0;
+        // ターゲットの仮想位置 (0-360度)
+        let targetAzimuth = 45; // 右に45度の位置
+        let targetPitch = 0;   // 水平の位置
 
-        // カメラの起動
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
-            .then(stream => {
-                video.srcObject = stream;
-                statusText.innerText = "横にずらしながら連続で撮影してください";
-            })
-            .catch(err => {
-                statusText.innerText = "カメラの起動に失敗しました: " + err;
+        let currentAlpha = 0; // 方位角
+        let currentBeta = 0;  // 前後傾き
+
+        // 1. カメラの起動
+        async function startCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" }, 
+                audio: false 
             });
+            video.srcObject = stream;
+        }
 
-        shutterBtn.addEventListener('click', () => {
-            if (totalWidth === 0) {
-                // 初回撮影時にキャンバスのサイズを決定
-                canvas.width = video.videoWidth * 3; // とりあえず3枚分くらいの横幅
-                canvas.height = video.videoHeight;
-                canvas.style.display = "block";
-                photoHeight = video.videoHeight;
+        // 2. センサーの許可と開始
+        startBtn.addEventListener('click', async () => {
+            // iOSなどのための権限リクエスト
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                const permission = await DeviceOrientationEvent.requestPermission();
+                if (permission !== 'granted') return;
             }
 
-            // 現在の映像をキャンバスの右端に描き加える
-            // 実際は少し重ねる（オーバーラップ）させるとパノラマっぽくなります
-            const overlap = 50; // 重なり部分（ピクセル）
-            ctx.drawImage(video, totalWidth, 0, video.videoWidth, video.videoHeight);
-            
-            totalWidth += (video.videoWidth - overlap);
-            statusText.innerText = "撮影成功！さらに右へずらして撮影...";
-            downloadBtn.style.display = "inline-block";
+            await startCamera();
+            startOverlay.style.display = 'none';
+            window.addEventListener('deviceorientation', handleOrientation);
+            updateLoop();
         });
 
-        downloadBtn.addEventListener('click', () => {
-            const link = document.createElement('a');
-            link.download = 'panorama.jpg';
-            link.href = canvas.toDataURL('image/jpeg');
-            link.click();
-        });
+        function handleOrientation(event) {
+            // alpha: 北を基準にした回転(0-360), beta: 前後の傾き(-180-180)
+            currentAlpha = event.alpha;
+            currentBeta = event.beta;
+        }
+
+        function updateLoop() {
+            // 方位角の差分計算
+            let diffA = targetAzimuth - (360 - currentAlpha);
+            let diffB = targetPitch - (currentBeta - 90); // 垂直持ちを基準に調整
+
+            // 画面上の座標に変換（簡易的な投影）
+            const fov = 60; // 視野角の想定
+            const screenX = (window.innerWidth / 2) + (diffA * (window.innerWidth / fov));
+            const screenY = (window.innerHeight / 2) + (diffB * (window.innerHeight / fov));
+
+            target.style.display = 'block';
+            target.style.left = screenX + 'px';
+            target.style.top = screenY + 'px';
+
+            // 判定：中心のレティクルと重なったか
+            const distance = Math.sqrt(Math.pow(window.innerWidth/2 - screenX, 2) + Math.pow(window.innerHeight/2 - screenY, 2));
+
+            if (distance < 25) { // 25px以内に近づいたら
+                target.style.background = "#2ed573";
+                autoShutter();
+            } else {
+                target.style.background = "#ff3e3e";
+            }
+
+            requestAnimationFrame(updateLoop);
+        }
+
+        function autoShutter() {
+            // ここで写真を保存する処理
+            statusText.innerText = "📸 撮影しました！ 次のポイントへ...";
+            
+            // 次のターゲットを適当に移動させる（例：右へ30度）
+            targetAzimuth = (targetAzimuth + 30) % 360;
+            
+            // 実際はここでCanvasに描画して保存処理を行う
+            const flash = document.createElement('div');
+            flash.style.cssText = "position:fixed; inset:0; background:white; z-index:1000;";
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 100);
+        }
     </script>
 </body>
 </html>
