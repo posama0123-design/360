@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>360ARカメラ</title>
+    <title>360全方位ARカメラ</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     
@@ -13,46 +13,54 @@
         body { margin: 0; overflow: hidden; background: #000; }
         .ui-msg {
             position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.7); color: white; padding: 15px 25px;
-            border-radius: 30px; z-index: 1000; width: 80%; text-align: center;
-            font-family: sans-serif; pointer-events: none;
+            background: rgba(0,0,0,0.8); color: white; padding: 12px 20px;
+            border-radius: 30px; z-index: 1000; width: 85%; text-align: center;
+            font-family: sans-serif; pointer-events: none; font-size: 14px;
         }
         #shutter-flash {
             position: fixed; inset: 0; background: white; z-index: 2000; display: none;
         }
         #save-panel {
-            position: fixed; top: 20px; right: 20px; z-index: 1001; display: none;
+            position: fixed; top: 20px; right: 20px; z-index: 1001;
         }
         button {
-            padding: 12px 24px; background: #28a745; color: white; border: none; border-radius: 8px; font-weight: bold;
+            padding: 12px 20px; background: #28a745; color: white; border: none; border-radius: 8px; font-weight: bold;
+        }
+        /* ロード中表示 */
+        #loader {
+            position: fixed; inset: 0; background: #000; color: white;
+            display: flex; align-items: center; justify-content: center; z-index: 3000;
         }
     </style>
 </head>
 <body>
 
+    <div id="loader">カメラ起動中...画面をタップしてください</div>
     <div id="shutter-flash"></div>
-    <div class="ui-msg" id="msg">周りを見渡して「赤い球」を探してください</div>
+    <div class="ui-msg" id="msg">全方向の点を「緑」に変えてください (残り: 6)</div>
     
     <div id="save-panel">
-        <button id="save-btn">パノラマを保存</button>
+        <button id="save-btn">パノラマ書き出し</button>
     </div>
 
     <a-scene embedded vr-mode-ui="enabled: false" arjs="sourceType: webcam; debugUIEnabled: false;">
         
         <a-entity camera look-controls raycaster="objects: .target">
-            <a-entity cursor="fuse: true; fuseTimeout: 1000"
+            <a-entity id="cursor" cursor="fuse: true; fuseTimeout: 1000"
                       position="0 0 -1"
                       geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
                       material="color: #007AFF; shader: flat">
-                <a-animation attribute="scale" begin="cursor-fusing" easing="ease-in" dur="1000" fill="backwards" from="1 1 1" to="0.1 0.1 0.1"></a-animation>
+                <a-animation begin="cursor-fusing" easing="linear" dur="1000" attribute="scale" from="1 1 1" to="0.1 0.1 0.1"></a-animation>
+                <a-animation begin="mouseleave" easing="linear" dur="100" attribute="scale" to="1 1 1"></a-animation>
             </a-entity>
         </a-entity>
 
-        <a-sphere class="target" position="0 0 -5" radius="0.3" color="#ff0000"></a-sphere>
-        <a-sphere class="target" position="5 0 0" radius="0.3" color="#ff0000"></a-sphere>
-        <a-sphere class="target" position="0 0 5" radius="0.3" color="#ff0000"></a-sphere>
-        <a-sphere class="target" position="-5 0 0" radius="0.3" color="#ff0000"></a-sphere>
-        <a-sphere class="target" position="0 5 0" radius="0.3" color="#ff0000"></a-sphere>
+        <a-sphere class="target" id="pt1" position="0 0 -4" radius="0.25" color="#ff0000" data-taken="false"></a-sphere>
+        <a-sphere class="target" id="pt2" position="4 0 0" radius="0.25" color="#ff0000" data-taken="false"></a-sphere>
+        <a-sphere class="target" id="pt3" position="0 0 4" radius="0.25" color="#ff0000" data-taken="false"></a-sphere>
+        <a-sphere class="target" id="pt4" position="-4 0 0" radius="0.25" color="#ff0000" data-taken="false"></a-sphere>
+        <a-sphere class="target" id="pt5" position="0 4 0" radius="0.25" color="#ff0000" data-taken="false"></a-sphere>
+        <a-sphere class="target" id="pt6" position="0 -4 0" radius="0.25" color="#ff0000" data-taken="false"></a-sphere>
 
     </a-scene>
 
@@ -60,25 +68,33 @@
         const msg = document.getElementById('msg');
         const flash = document.getElementById('shutter-flash');
         const saveBtn = document.getElementById('save-btn');
+        const loader = document.getElementById('loader');
         let capturedImages = [];
 
-        // 球体にカーソルが合って1秒経つと発火
+        // 画面タップで開始（iPhone対策）
+        window.addEventListener('click', () => {
+            loader.style.display = 'none';
+        });
+
+        // ターゲットにカーソルが合って1秒経つ（fuse発火）と click イベントが飛ぶ
         document.querySelectorAll('.target').forEach(target => {
             target.addEventListener('click', function () {
-                if (this.getAttribute('visible') === false) return;
+                // すでに撮影済みならスキップ
+                if (this.getAttribute('data-taken') === "true") return;
                 
-                // 撮影処理
                 takePhoto(this);
             });
         });
 
         function takePhoto(el) {
-            // フラッシュ演出
+            // 撮影フラッシュ
             flash.style.display = 'block';
             setTimeout(() => { flash.style.display = 'none'; }, 100);
 
-            // カメラ映像の保存
+            // カメラ映像をキャプチャ
             const video = document.querySelector('video');
+            if(!video) return;
+
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
@@ -86,21 +102,20 @@
             
             capturedImages.push(canvas.toDataURL('image/jpeg'));
 
-            // 撮ったドットを消す
-            el.setAttribute('visible', false);
-            el.setAttribute('scale', '0 0 0');
+            // 状態更新：点は消さずに色を緑に変える
+            el.setAttribute('color', '#28a745');
+            el.setAttribute('data-taken', "true");
 
-            msg.innerText = `ナイス！残り ${document.querySelectorAll('.target[visible="true"]').length} 個`;
-
-            if (document.querySelectorAll('.target[visible="true"]').length === 0) {
-                msg.innerText = "すべての地点を撮影しました！";
-                document.getElementById('save-panel').style.display = 'block';
-            }
+            const remaining = document.querySelectorAll('.target[data-taken="false"]').length;
+            msg.innerText = remaining > 0 ? `ナイス！残り: ${remaining}` : "全地点完了！書き出せます";
         }
 
         saveBtn.addEventListener('click', async () => {
+            if(capturedImages.length === 0) return alert("まだ1枚も撮れていません");
+
             const finalCanvas = document.createElement('canvas');
             const num = capturedImages.length;
+            // 縦に並べると360度感が薄れるので、とりあえず横に繋げます
             finalCanvas.width = 1280 * num;
             finalCanvas.height = 720;
             const ctx = finalCanvas.getContext('2d');
@@ -113,15 +128,9 @@
             }
 
             const link = document.createElement('a');
-            link.download = 'panorama.jpg';
+            link.download = `360_panorama_${Date.now()}.jpg`;
             link.href = finalCanvas.toDataURL('image/jpeg');
             link.click();
-        });
-
-        // iPhone対策：画面をどこでもいいからタップするとARが安定開始する
-        window.addEventListener('click', () => {
-            const scene = document.querySelector('a-scene');
-            if (scene) msg.innerText = "ターゲットを探してください...";
         });
     </script>
 </body>
