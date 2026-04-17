@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360度パノラマビューアー</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        .instruction {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-family: sans-serif;
+            z-index: 10;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="instruction">
+        マウスでドラッグ、またはスマホを動かして周囲を見渡せます
+    </div>
+
+    <a-scene>
+        <a-sky src="https://raw.githack.com/aframevr/aframe/master/examples/boilerplate/panorama/puydesancy.jpg" 
+               rotation="0 -90 0"></a-sky>
+    </a-scene>
+
+</body>
+</html>
