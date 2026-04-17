@@ -1,111 +1,139 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="utf-8">
-    <title>本格ARパノラマ書き上げカメラ</title>
+    <title>360ARカメラ</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="360ARカメラ">
+    <link rel="apple-touch-icon" href="https://via.placeholder.com/192/FF0000/FFFFFF?text=360">
+
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+
     <style>
-        .ui-layer {
-            position: fixed; z-index: 100; width: 100%; text-align: center;
-            bottom: 20px; pointer-events: none;
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        .ui {
+            position: fixed; z-index: 1000; width: 100%; text-align: center;
+            bottom: 30px; pointer-events: none;
         }
-        #shutter-info {
-            background: rgba(0,0,0,0.7); color: white; padding: 10px 20px;
-            border-radius: 30px; display: inline-block; font-family: sans-serif;
+        #msg {
+            background: rgba(0,0,0,0.8); color: white; padding: 12px 24px;
+            border-radius: 50px; display: inline-block; font-size: 14px;
         }
-        #save-btn {
-            position: fixed; top: 20px; right: 20px; z-index: 101;
-            padding: 10px 20px; background: #2ed573; color: white;
-            border: none; border-radius: 5px; display: none;
+        #btn-container {
+            position: fixed; top: 20px; width: 100%; display: flex;
+            justify-content: center; z-index: 1001; gap: 10px;
+        }
+        button {
+            padding: 10px 20px; border-radius: 8px; border: none;
+            background: #007AFF; color: white; font-weight: bold;
+        }
+        #save-btn { background: #28a745; display: none; }
+        /* カメラ未許可時の警告 */
+        #error-msg {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: white; color: black; padding: 20px; border-radius: 10px;
+            z-index: 2000; display: none; width: 80%; text-align: center;
         }
     </style>
 </head>
-<body style="margin: 0; overflow: hidden;">
+<body>
 
-    <button id="save-btn">現在のパノラマを保存</button>
-
-    <div class="ui-layer">
-        <div id="shutter-info">ドット（AR地点）にカメラを向けてください</div>
+    <div id="error-msg">
+        <p>カメラまたはセンサーが起動しません。</p>
+        <p style="font-size: 12px;">設定からブラウザのカメラ許可をONにするか、再読み込みしてください。iPhoneの場合は「ホーム画面に追加」してから起動すると安定します。</p>
+        <button onclick="location.reload()">再読み込み</button>
     </div>
 
-    <a-scene embedded vr-mode-ui="enabled: false" arjs="sourceType: webcam; debugUIEnabled: false;">
+    <div id="btn-container">
+        <button id="reset-btn" onclick="location.reload()">リセット</button>
+        <button id="save-btn">パノラマを書き出す</button>
+    </div>
+
+    <div class="ui">
+        <div id="msg">赤い点に中心を合わせて1秒静止してください</div>
+    </div>
+
+    <a-scene embedded vr-mode-ui="enabled: false" 
+             arjs="sourceType: webcam; debugUIEnabled: false; videoTexture: true;">
         
-        <a-entity camera>
-            <a-entity cursor="fuse: true; fuseTimeout: 500"
-                      position="0 0 -1"
+        <a-entity camera look-controls cursor="fuse: true; fuseTimeout: 1000">
+            <a-entity position="0 0 -1"
                       geometry="primitive: ring; radiusInner: 0.02; radiusOuter: 0.03"
-                      material="color: white; shader: flat">
+                      material="color: #007AFF; shader: flat">
             </a-entity>
         </a-entity>
 
-        <a-sphere class="target" position="0 0 -5" radius="0.3" color="#ff3e3e" data-id="0"></a-sphere>
-        <a-sphere class="target" position="5 0 0" radius="0.3" color="#ff3e3e" data-id="1"></a-sphere>
-        <a-sphere class="target" position="0 0 5" radius="0.3" color="#ff3e3e" data-id="2"></a-sphere>
-        <a-sphere class="target" position="-5 0 0" radius="0.3" color="#ff3e3e" data-id="3"></a-sphere>
-
+        <a-sphere class="target" position="0 0 -4" radius="0.2" color="#ff0000" data-id="0"></a-sphere>
+        <a-sphere class="target" position="4 0 0" radius="0.2" color="#ff0000" data-id="1"></a-sphere>
+        <a-sphere class="target" position="0 0 4" radius="0.2" color="#ff0000" data-id="2"></a-sphere>
+        <a-sphere class="target" position="-4 0 0" radius="0.2" color="#ff0000" data-id="3"></a-sphere>
     </a-scene>
 
-    <canvas id="hidden-canvas" style="display:none;"></canvas>
+    <canvas id="work-canvas" style="display:none;"></canvas>
 
     <script>
+        const msg = document.getElementById('msg');
         const saveBtn = document.getElementById('save-btn');
-        const info = document.getElementById('shutter-info');
-        const video = document.querySelector('video'); // AR.jsが生成するビデオ要素
-        let capturedBlobs = [];
+        let capturedImages = [];
 
-        // ターゲットと照準が重なった時のイベント
-        const targets = document.querySelectorAll('.target');
-        targets.forEach(t => {
-            t.addEventListener('mouseenter', () => {
-                if (t.getAttribute('visible') === false) return;
-                
-                t.setAttribute('color', '#2ed573'); // 緑色に
-                
-                // 1秒後に撮影（視線入力）
-                setTimeout(() => {
-                    takeSnapshot(t);
-                }, 800);
+        // カメラ許可が取れない場合の監視
+        window.addEventListener('camera-error', () => {
+            document.getElementById('error-msg').style.display = 'block';
+        });
+
+        // ターゲットに重なった時の処理
+        document.querySelectorAll('.target').forEach(el => {
+            el.addEventListener('click', () => { // A-Frameのcursor fuseはclickイベントを発火させる
+                if (!el.getAttribute('visible')) return;
+                capture(el);
             });
         });
 
-        function takeSnapshot(targetEl) {
-            // ARシーンから現在のビデオフレームを取得
-            const v = document.querySelector('video');
-            const canvas = document.getElementById('hidden-canvas');
-            canvas.width = v.videoWidth;
-            canvas.height = v.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(v, 0, 0);
+        function capture(el) {
+            const video = document.querySelector('video');
+            if (!video) return;
 
-            // 保存
+            const canvas = document.getElementById('work-canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            // 撮影演出
+            msg.innerText = "📸 撮影成功！";
+            el.setAttribute('visible', false);
+            el.setAttribute('scale', '0 0 0');
+
             canvas.toBlob(blob => {
-                capturedBlobs.push(blob);
-                targetEl.setAttribute('visible', 'false'); // 撮ったドットは消す
-                info.innerText = `撮影成功！ 残り: ${document.querySelectorAll('.target[visible="true"]').length}`;
-                
-                if (capturedBlobs.length >= 4) {
+                capturedImages.push(blob);
+                if (capturedImages.length >= 4) {
                     saveBtn.style.display = 'block';
-                    info.innerText = "全地点完了！右上のボタンで保存してください";
+                    msg.innerText = "完了！右上のボタンで書き出し";
+                } else {
+                    setTimeout(() => { msg.innerText = "次の点を探してください"; }, 1500);
                 }
             }, 'image/jpeg');
         }
 
         saveBtn.addEventListener('click', async () => {
-            // 簡易結合（横並べ）
             const canvas = document.createElement('canvas');
-            const imgHeight = 1080;
-            const imgWidth = 1920;
-            canvas.width = imgWidth * capturedBlobs.length;
-            canvas.height = imgHeight;
+            // 横に繋げる
+            canvas.width = 1280 * capturedImages.length;
+            canvas.height = 720;
             const ctx = canvas.getContext('2d');
 
-            for (let i = 0; i < capturedBlobs.length; i++) {
-                const img = await createImageBitmap(capturedBlobs[i]);
-                ctx.drawImage(img, i * imgWidth, 0, imgWidth, imgHeight);
+            for (let i = 0; i < capturedImages.length; i++) {
+                const img = await createImageBitmap(capturedImages[i]);
+                ctx.drawImage(img, i * 1280, 0, 1280, 720);
             }
 
             const link = document.createElement('a');
-            link.download = 'ar-panorama.jpg';
+            link.download = `360_photo_${Date.now()}.jpg`;
             link.href = canvas.toDataURL('image/jpeg');
             link.click();
         });
