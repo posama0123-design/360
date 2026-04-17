@@ -3,35 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>360度パノラマビューアー</title>
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <title>360度パノラマカメラガイド</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        .instruction {
+        body { font-family: sans-serif; margin: 0; text-align: center; background: #222; color: white; }
+        #container { position: relative; width: 100%; max-width: 600px; margin: auto; overflow: hidden; }
+        video { width: 100%; background: #000; }
+        
+        /* 撮影ガイド（中央の枠） */
+        #guide {
             position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.6);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-family: sans-serif;
-            z-index: 10;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%; height: 60%;
+            border: 2px dashed rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 0 5000px rgba(0, 0, 0, 0.5); /* 枠の外を暗くする */
             pointer-events: none;
+        }
+        #guide::after {
+            content: "前の写真と少し重ねて撮影してください";
+            position: absolute; bottom: -30px; left: 0; width: 100%; font-size: 12px;
+        }
+
+        .controls { padding: 20px; }
+        button { padding: 15px 30px; font-size: 16px; border-radius: 50px; border: none; cursor: pointer; }
+        #shutter { background: #ff4757; color: white; margin-bottom: 10px; }
+        #download { background: #2ed573; color: white; display: none; }
+        
+        #previewCanvas { 
+            width: 100%; margin-top: 10px; border: 1px solid #555; 
+            background: #000; display: none;
         }
     </style>
 </head>
 <body>
 
-    <div class="instruction">
-        マウスでドラッグ、またはスマホを動かして周囲を見渡せます
+    <h2>パノラマ作成ガイド</h2>
+
+    <div id="container">
+        <video id="video" autoplay playsinline></video>
+        <div id="guide"></div>
     </div>
 
-    <a-scene>
-        <a-sky src="https://raw.githack.com/aframevr/aframe/master/examples/boilerplate/panorama/puydesancy.jpg" 
-               rotation="0 -90 0"></a-sky>
-    </a-scene>
+    <div class="controls">
+        <button id="shutter">📸 撮影して右に繋げる</button>
+        <br><br>
+        <canvas id="previewCanvas"></canvas>
+        <br>
+        <button id="download">完成した画像を保存</button>
+        <p id="status">カメラを許可してください</p>
+    </div>
 
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('previewCanvas');
+        const ctx = canvas.getContext('2d');
+        const shutterBtn = document.getElementById('shutter');
+        const downloadBtn = document.getElementById('download');
+        const statusText = document.getElementById('status');
+
+        let totalWidth = 0;
+        let photoHeight = 0;
+
+        // カメラの起動
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+            .then(stream => {
+                video.srcObject = stream;
+                statusText.innerText = "横にずらしながら連続で撮影してください";
+            })
+            .catch(err => {
+                statusText.innerText = "カメラの起動に失敗しました: " + err;
+            });
+
+        shutterBtn.addEventListener('click', () => {
+            if (totalWidth === 0) {
+                // 初回撮影時にキャンバスのサイズを決定
+                canvas.width = video.videoWidth * 3; // とりあえず3枚分くらいの横幅
+                canvas.height = video.videoHeight;
+                canvas.style.display = "block";
+                photoHeight = video.videoHeight;
+            }
+
+            // 現在の映像をキャンバスの右端に描き加える
+            // 実際は少し重ねる（オーバーラップ）させるとパノラマっぽくなります
+            const overlap = 50; // 重なり部分（ピクセル）
+            ctx.drawImage(video, totalWidth, 0, video.videoWidth, video.videoHeight);
+            
+            totalWidth += (video.videoWidth - overlap);
+            statusText.innerText = "撮影成功！さらに右へずらして撮影...";
+            downloadBtn.style.display = "inline-block";
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'panorama.jpg';
+            link.href = canvas.toDataURL('image/jpeg');
+            link.click();
+        });
+    </script>
 </body>
 </html>
